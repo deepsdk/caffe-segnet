@@ -169,91 +169,53 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     const Dtype* weights, Dtype* output, bool skip_im2col) {
-  std::cout << "dbg>BaseConvolutionLayer>forward_cpu_gemm enter---------------" << std::endl;
-  const Dtype* col_buff = input;
-  Blob<Dtype> col_buffer_split;
-  if (!is_1x1_) {
-    if (!skip_im2col) {
-      conv_im2col_cpu(input, col_buffer_.mutable_cpu_data());
-//      conv_im2col_cpu_split(input+0*3*3, col_buffer_.mutable_cpu_data(), 3);
-      std::cout << "  col_buffer_=" << col_buffer_.shape_string() << std::endl;
-      const Dtype* data = col_buffer_.cpu_data();
-      for(int c = 0; c < 12; c++){
+
+  int col_size = kernel_dim_*height_*width_;
+  std::cout << "Col size is " << col_size << ", memory size is " << col_size*sizeof(Dtype) << " bytes" << std::endl;
+
+  int SPLIT_MIN = 36;
+  if (col_size > SPLIT_MIN){
+    int split_count = (col_size + 1) / SPLIT_MIN;
+    std::cout << "Split into " << split_count << " splits." << std::endl;
+
+    Blob<Dtype> col_buffer_split;
+    vector<int> col_buffer_split_shape(col_buffer_.shape());
+    col_buffer_split_shape[1] = (col_buffer_split_shape[1]+1)/split_count;
+    col_buffer_split.Reshape(col_buffer_split_shape);
+    Dtype* col = col_buffer_split.mutable_cpu_data();
+
+    Blob<Dtype> weight_split;
+    int weight_split_channels = (conv_in_channels_+1)/split_count;
+    int kernel_size = kernel_h_ * kernel_w_;
+    weight_split.Reshape(conv_out_channels_, weight_split_channels, kernel_h_, kernel_w_);
+    Dtype* w = weight_split.mutable_cpu_data();
+
+    Blob<Dtype> out_split;
+    out_split.Reshape(1, conv_out_channels_, height_, width_);
+    Dtype* out = out_split.mutable_cpu_data();
+
+    std::cout << "col_buffer_'s shape is " << col_buffer_.shape_string() << std::endl;
+    std::cout << "col_buffer_split's shape is " << col_buffer_split.shape_string() << std::endl;
+    std::cout << "weight_split's shape is " << weight_split.shape_string() << std::endl;
+
+    std::cout << "out 1=====================================" << std::endl;
+    for(int split = 0; split < split_count; split++){
+      std::cout << "split " << split << std::endl;
+      conv_im2col_cpu_split(input + split * height_ * width_, col, split_count);
+      for(int n = 0; n < conv_out_channels_; n++){
+        int id = n * conv_in_channels_ * kernel_size + split * kernel_size;
+        memcpy(w + n * kernel_size, weights + id, kernel_size * sizeof(Dtype));
+      }
+
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
+          group_, conv_out_spatial_dim_, weight_split_channels * kernel_size / group_,
+          (Dtype)1., w, col,
+          (Dtype)0., output);
+
+      for(int c = 0; c < 2; c++){
         for(int i = 0; i < 4; i++){
           int id = c*4 + i;
-          std::cout << " " << data[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
-      }
-    }
-    col_buff = col_buffer_.cpu_data();
-  }
-  for(int n = 0; n < 2; n++){
-    std::cout << "----------weights[" << n << "]" << std::endl;
-    for(int c = 0; c < 3; c++){
-      for(int i = 0; i < 4; i++){
-        int id = n * 3 * 4 + c*4 + i;
-        std::cout << " " << weights[id];
-      }
-      std::cout << std::endl;
-      if ((c+1)%4 == 0){
-        std::cout << std::endl;
-      }
-    }
-  }
-
-  //////////////////////////////////////////////////////
-
-  Blob<Dtype> weight_split;
-  int s[] = {2,1,2,2};
-  vector<int> shape(s, s+4);
-  weight_split.Reshape(shape);
-
-  Blob<Dtype> output_split;
-  int ss[] = {1,2,2,2};
-  vector<int> shape2(ss, ss+4);
-  output_split.Reshape(shape2);
-
-  {
-    col_buffer_split.Reshape(col_buffer_.shape(0), (col_buffer_.shape(1)+1)/3, 
-        col_buffer_.shape(2), col_buffer_.shape(3));
-    conv_im2col_cpu_split(input+0*3*3, col_buffer_split.mutable_cpu_data(), 3);
-    std::cout << "  col_buffer_split=" << col_buffer_split.shape_string() << std::endl;
-    const Dtype* data2 = col_buffer_split.cpu_data();
-    for(int c = 0; c < col_buffer_split.shape(1); c++){
-      for(int i = 0; i < col_buffer_split.shape(2) * col_buffer_split.shape(3); i++){
-        int id = c*4 + i;
-        std::cout << " " << data2[id];
-      }
-      std::cout << std::endl;
-      if ((c+1)%4 == 0){
-        std::cout << std::endl;
-      }
-    }
-
-    std::cout << "------w.shape=" << weight_split.shape_string() << std::endl;
-    Dtype* w = weight_split.mutable_cpu_data();
-    int idTo = 0;
-    for(int n = 0; n < 2; n++){
-      for(int c = 0; c < 3; c++){
-        if (c == 0){
-          for(int i = 0; i < 2*2; i++){
-            int idFrom = n * 3 * 4 + c*4 + i;
-            w[idTo] = weights[idFrom];
-            idTo++;
-          }
-        }
-      }
-    }
-    for(int n = 0; n < 2; n++){
-      std::cout << "  w[" << n << "]" << std::endl;
-      for(int c = 0; c < 1; c++){
-        for(int i = 0; i < 2*2; i++){
-          int id = n * 1 * 4 + c*4 + i;
-          std::cout << " " << w[id];
+          std::cout << " " << output[id];
         }
         std::cout << std::endl;
         if ((c+1)%4 == 0){
@@ -263,22 +225,28 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     }
 
 
-    int g = 0;
-    const Dtype* col = col_buffer_split.cpu_data();
-    Dtype* out = output_split.mutable_cpu_data();
-    int kernel_dim = (conv_in_channels_+1)/3 * kernel_h_ * kernel_w_;
+    std::cout << "out 2=====================================" << std::endl;
+    memset(output, 0, sizeof(Dtype)*out_split.count());
+    for(int split = 0; split < split_count; split++){
+      conv_im2col_cpu_split(input + split * height_ * width_, col, split_count);
+      for(int n = 0; n < conv_out_channels_; n++){
+        int id = n * conv_in_channels_ * kernel_size + split * kernel_size;
+        memcpy(w + n * kernel_size, weights + id, kernel_size * sizeof(Dtype));
+      }
 
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
-        group_, conv_out_spatial_dim_, kernel_dim / group_,
-        (Dtype)1., w, col,
-        (Dtype)0., out);
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
+          group_, conv_out_spatial_dim_, weight_split_channels * kernel_size / group_,
+          (Dtype)1., w, col,
+          (Dtype)0., out);
 
-    for(int n = 0; n < output_split.shape(0); n++){
-      std::cout << " out[" << n << "]" << std::endl;
-      for(int c = 0; c < output_split.shape(1); c++){
-        for(int i = 0; i < output_split.shape(2)*output_split.shape(3); i++){
-          int id = n * output_split.shape(1) * output_split.shape(2)*output_split.shape(3) + 
-            c*output_split.shape(2)*output_split.shape(3) + i;
+      for(int i = 0; i < out_split.count(); i++){
+        output[i] += out[i];
+      }
+
+      std::cout << "out----------" << std::endl;
+      for(int c = 0; c < 2; c++){
+        for(int i = 0; i < 4; i++){
+          int id = c*4 + i;
           std::cout << " " << out[id];
         }
         std::cout << std::endl;
@@ -286,47 +254,12 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
           std::cout << std::endl;
         }
       }
-    }
-  }
 
-  {
-    col_buffer_split.Reshape(col_buffer_.shape(0), (col_buffer_.shape(1)+1)/3, 
-        col_buffer_.shape(2), col_buffer_.shape(3));
-    conv_im2col_cpu_split(input+1*3*3, col_buffer_split.mutable_cpu_data(), 3);
-    std::cout << "  col_buffer_split=" << col_buffer_split.shape_string() << std::endl;
-    const Dtype* data2 = col_buffer_split.cpu_data();
-    for(int c = 0; c < col_buffer_split.shape(1); c++){
-      for(int i = 0; i < col_buffer_split.shape(2) * col_buffer_split.shape(3); i++){
-        int id = c*4 + i;
-        std::cout << " " << data2[id];
-      }
-      std::cout << std::endl;
-      if ((c+1)%4 == 0){
-        std::cout << std::endl;
-      }
-    }
-
-
-    std::cout << "------w.shape=" << weight_split.shape_string() << std::endl;
-    Dtype* w = weight_split.mutable_cpu_data();
-    int idTo = 0;
-    for(int n = 0; n < 2; n++){
-      for(int c = 0; c < 3; c++){
-        if (c == 1){
-          for(int i = 0; i < 2*2; i++){
-            int idFrom = n * 3 * 4 + c*4 + i;
-            w[idTo] = weights[idFrom];
-            idTo++;
-          }
-        }
-      }
-    }
-    for(int n = 0; n < 2; n++){
-      std::cout << "  w[" << n << "]" << std::endl;
-      for(int c = 0; c < 1; c++){
-        for(int i = 0; i < 2*2; i++){
-          int id = n * 1 * 4 + c*4 + i;
-          std::cout << " " << w[id];
+      std::cout << "output----------" << std::endl;
+      for(int c = 0; c < 2; c++){
+        for(int i = 0; i < 4; i++){
+          int id = c*4 + i;
+          std::cout << " " << output[id];
         }
         std::cout << std::endl;
         if ((c+1)%4 == 0){
@@ -335,120 +268,20 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
       }
     }
 
-
-    int g = 0;
-    const Dtype* col = col_buffer_split.cpu_data();
-    Dtype* out = output_split.mutable_cpu_data();
-    int kernel_dim = (conv_in_channels_+1)/3 * kernel_h_ * kernel_w_;
-
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
-        group_, conv_out_spatial_dim_, kernel_dim / group_,
-        (Dtype)1., w, col,
-        (Dtype)0., out);
-
-    for(int n = 0; n < output_split.shape(0); n++){
-      std::cout << " out[" << n << "]" << std::endl;
-      for(int c = 0; c < output_split.shape(1); c++){
-        for(int i = 0; i < output_split.shape(2)*output_split.shape(3); i++){
-          int id = n * output_split.shape(1) * output_split.shape(2)*output_split.shape(3) + 
-            c*output_split.shape(2)*output_split.shape(3) + i;
-          std::cout << " " << out[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
+  }else{
+    const Dtype* col_buff = input;
+    if (!is_1x1_) {
+      if (!skip_im2col) {
+        conv_im2col_cpu(input, col_buffer_.mutable_cpu_data());
       }
+      col_buff = col_buffer_.cpu_data();
     }
-  }
-
-  {
-    col_buffer_split.Reshape(col_buffer_.shape(0), (col_buffer_.shape(1)+1)/3, 
-        col_buffer_.shape(2), col_buffer_.shape(3));
-    conv_im2col_cpu_split(input+2*3*3, col_buffer_split.mutable_cpu_data(), 3);
-    std::cout << "  col_buffer_split=" << col_buffer_split.shape_string() << std::endl;
-    const Dtype* data2 = col_buffer_split.cpu_data();
-    for(int c = 0; c < col_buffer_split.shape(1); c++){
-      for(int i = 0; i < col_buffer_split.shape(2) * col_buffer_split.shape(3); i++){
-        int id = c*4 + i;
-        std::cout << " " << data2[id];
-      }
-      std::cout << std::endl;
-      if ((c+1)%4 == 0){
-        std::cout << std::endl;
-      }
+    for (int g = 0; g < group_; ++g) {
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
+          group_, conv_out_spatial_dim_, kernel_dim_ / group_,
+          (Dtype)1., weights + weight_offset_ * g, col_buff + col_offset_ * g,
+          (Dtype)0., output + output_offset_ * g);
     }
-
-    std::cout << "------w.shape=" << weight_split.shape_string() << std::endl;
-    Dtype* w = weight_split.mutable_cpu_data();
-    int idTo = 0;
-    for(int n = 0; n < 2; n++){
-      for(int c = 0; c < 3; c++){
-        if (c == 2){
-          for(int i = 0; i < 2*2; i++){
-            int idFrom = n * 3 * 4 + c*4 + i;
-            w[idTo] = weights[idFrom];
-            idTo++;
-          }
-        }
-      }
-    }
-    for(int n = 0; n < 2; n++){
-      std::cout << "  w[" << n << "]" << std::endl;
-      for(int c = 0; c < 1; c++){
-        for(int i = 0; i < 2*2; i++){
-          int id = n * 1 * 4 + c*4 + i;
-          std::cout << " " << w[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
-      }
-    }
-
-
-    int g = 0;
-    const Dtype* col = col_buffer_split.cpu_data();
-    Dtype* out = output_split.mutable_cpu_data();
-    int kernel_dim = (conv_in_channels_+1)/3 * kernel_h_ * kernel_w_;
-
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
-        group_, conv_out_spatial_dim_, kernel_dim / group_,
-        (Dtype)1., w, col,
-        (Dtype)0., out);
-
-    for(int n = 0; n < output_split.shape(0); n++){
-      std::cout << " out[" << n << "]" << std::endl;
-      for(int c = 0; c < output_split.shape(1); c++){
-        for(int i = 0; i < output_split.shape(2)*output_split.shape(3); i++){
-          int id = n * output_split.shape(1) * output_split.shape(2)*output_split.shape(3) + 
-            c*output_split.shape(2)*output_split.shape(3) + i;
-          std::cout << " " << out[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
-      }
-    }
-  }  
-  //////////////////////////////////////////////////////
-
-
-  for (int g = 0; g < group_; ++g) {
-    std::cout << "dbg>base>conv_out_channels_=" << conv_out_channels_ << std::endl;
-    std::cout << "dbg>base>group_=" << group_ << std::endl;
-    std::cout << "dbg>base>conv_out_spatial_dim_=" << conv_out_spatial_dim_ << std::endl;
-    std::cout << "dbg>base>kernel_dim_=" << kernel_dim_ << std::endl;
-    std::cout << "dbg>base>weight_offset_=" << weight_offset_ << std::endl;
-    std::cout << "dbg>base>col_offset_=" << col_offset_ << std::endl;
-    std::cout << "dbg>base>output_offset_=" << output_offset_ << std::endl;
-
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
-        group_, conv_out_spatial_dim_, kernel_dim_ / group_,
-        (Dtype)1., weights + weight_offset_ * g, col_buff + col_offset_ * g,
-        (Dtype)0., output + output_offset_ * g);
   }
 }
 
