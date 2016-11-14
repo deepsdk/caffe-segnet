@@ -103,8 +103,6 @@ void BaseConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
-  std::cout << "dbg>BaseConvolutionLayer>Reshape enter-------------" << std::endl;
-
   CHECK_EQ(4, bottom[0]->num_axes()) << "Input must have 4 axes, "
       << "corresponding to (num, channels, height, width)";
   num_ = bottom[0]->num();
@@ -112,7 +110,6 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   width_ = bottom[0]->width();
   CHECK_EQ(bottom[0]->channels(), channels_) << "Input size incompatible with"
     " convolution kernel.";
-  std::cout << "    num_=" << num_ << ", height_=" <<  height_ << ", width_=" << width_ << ", channels_=" << channels_ << std::endl;
   // TODO: generalize to handle inputs of different shapes.
   for (int bottom_id = 1; bottom_id < bottom.size(); ++bottom_id) {
     CHECK_EQ(num_, bottom[bottom_id]->num()) << "Inputs must have same num.";
@@ -128,7 +125,6 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   for (int top_id = 0; top_id < top.size(); ++top_id) {
     top[top_id]->Reshape(num_, num_output_, height_out_, width_out_);
   }
-  std::cout << "    num_=" << num_ << ", num_output_=" << num_output_ <<", height_out_=" <<  height_out_ << ", width_out_=" << width_out_ << std::endl;
 
   if (reverse_dimensions()) {
     conv_in_height_ = height_out_;
@@ -139,12 +135,10 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     conv_in_width_ = width_;
     conv_out_spatial_dim_ = height_out_ * width_out_;
   }
-  std::cout << "    conv_in_height_=" << conv_in_height_ << ", conv_in_width_=" << conv_in_width_ << ", conv_out_spatial_dim_=" << conv_out_spatial_dim_ << std::endl; 
   kernel_dim_ = conv_in_channels_ * kernel_h_ * kernel_w_;
   weight_offset_ = conv_out_channels_ * kernel_dim_ / group_ / group_;
   col_offset_ = kernel_dim_ * conv_out_spatial_dim_ / group_;
   output_offset_ = conv_out_channels_ * conv_out_spatial_dim_ / group_;
-  std::cout << "    kernel_dim_=" << kernel_dim_ << ", weight_offset_=" << weight_offset_ << ", col_offset_=" << col_offset_ << ", output_offset_=" << output_offset_ << std::endl; 
   // The im2col result buffer will only hold one image at a time to avoid
   // overly large memory usage. In the special case of 1x1 convolution
   // it goes lazily unused to save memory.
@@ -153,9 +147,6 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   } else {
     col_buffer_.Reshape(1, kernel_dim_, height_out_, width_out_);
   }
-  std::cout << "----------------------------------" << std::endl;
-  std::cout << "    col_buffer_.shape=" << col_buffer_.shape_string() << std::endl; 
-  std::cout << "    kernel_dim_=" << kernel_dim_ << " <=  conv_in_channels_=" << conv_in_channels_ << " * kernel_h_=" << kernel_h_ << " * kernel_w_=" << kernel_w_ << std::endl; 
 
   // Set up the all ones "bias multiplier" for adding biases by BLAS
   if (bias_term_) {
@@ -173,10 +164,10 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
   int col_size = kernel_dim_*height_*width_;
   std::cout << "Col size is " << col_size << ", memory size is " << col_size*sizeof(Dtype) << " bytes" << std::endl;
 
-  int SPLIT_MIN = 36;
-  if (col_size > SPLIT_MIN){
-    int split_count = (col_size + 1) / SPLIT_MIN;
-    std::cout << "Split into " << split_count << " splits." << std::endl;
+  int SPLIT_SIZE = 500*1024*1024/sizeof(Dtype);
+  if (col_size > SPLIT_SIZE){
+    int split_count = (col_size + 1) / SPLIT_SIZE;
+    std::cout << "Split into " << split_count << " splits. Split size is " << SPLIT_SIZE << std::endl;
 
     Blob<Dtype> col_buffer_split;
     vector<int> col_buffer_split_shape(col_buffer_.shape());
@@ -191,41 +182,14 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     Dtype* w = weight_split.mutable_cpu_data();
 
     Blob<Dtype> out_split;
-    out_split.Reshape(1, conv_out_channels_, height_, width_);
+    out_split.Reshape(1, conv_out_channels_, height_out_, width_out_);
     Dtype* out = out_split.mutable_cpu_data();
 
     std::cout << "col_buffer_'s shape is " << col_buffer_.shape_string() << std::endl;
     std::cout << "col_buffer_split's shape is " << col_buffer_split.shape_string() << std::endl;
     std::cout << "weight_split's shape is " << weight_split.shape_string() << std::endl;
+    std::cout << "out_split's shape is " << out_split.shape_string() << std::endl;
 
-    std::cout << "out 1=====================================" << std::endl;
-    for(int split = 0; split < split_count; split++){
-      std::cout << "split " << split << std::endl;
-      conv_im2col_cpu_split(input + split * height_ * width_, col, split_count);
-      for(int n = 0; n < conv_out_channels_; n++){
-        int id = n * conv_in_channels_ * kernel_size + split * kernel_size;
-        memcpy(w + n * kernel_size, weights + id, kernel_size * sizeof(Dtype));
-      }
-
-      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
-          group_, conv_out_spatial_dim_, weight_split_channels * kernel_size / group_,
-          (Dtype)1., w, col,
-          (Dtype)0., output);
-
-      for(int c = 0; c < 2; c++){
-        for(int i = 0; i < 4; i++){
-          int id = c*4 + i;
-          std::cout << " " << output[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
-      }
-    }
-
-
-    std::cout << "out 2=====================================" << std::endl;
     memset(output, 0, sizeof(Dtype)*out_split.count());
     for(int split = 0; split < split_count; split++){
       conv_im2col_cpu_split(input + split * height_ * width_, col, split_count);
@@ -241,30 +205,6 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
 
       for(int i = 0; i < out_split.count(); i++){
         output[i] += out[i];
-      }
-
-      std::cout << "out----------" << std::endl;
-      for(int c = 0; c < 2; c++){
-        for(int i = 0; i < 4; i++){
-          int id = c*4 + i;
-          std::cout << " " << out[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
-      }
-
-      std::cout << "output----------" << std::endl;
-      for(int c = 0; c < 2; c++){
-        for(int i = 0; i < 4; i++){
-          int id = c*4 + i;
-          std::cout << " " << output[id];
-        }
-        std::cout << std::endl;
-        if ((c+1)%4 == 0){
-          std::cout << std::endl;
-        }
       }
     }
 
