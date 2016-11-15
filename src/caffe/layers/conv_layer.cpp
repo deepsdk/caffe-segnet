@@ -24,8 +24,13 @@ void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const Dtype* bottom_data = bottom[i]->cpu_data();
     Dtype* top_data = top[i]->mutable_cpu_data();
     for (int n = 0; n < this->num_; ++n) {
+      std::cout << "dbg>conv>top["<<i<<"].shape=" << top[i]->shape_string() << std::endl;
+      std::cout << "dbg>conv>bottom["<<i<<"].shape=" << bottom[i]->shape_string() << std::endl;
+      std::cout << "dbg>conv>weights=" << this->blobs_[0]->shape_string() << std::endl;
+      std::cout << "dbg>conv>call forward_cpu_gemm ----------------------" << std::endl;
       this->forward_cpu_gemm(bottom_data + bottom[i]->offset(n), weight,
           top_data + top[i]->offset(n));
+      std::cout << "dbg>conv>forward_cpu_gemm quit ----------------------" << std::endl;
       if (this->bias_term_) {
         const Dtype* bias = this->blobs_[1]->cpu_data();
         this->forward_cpu_bias(top_data + top[i]->offset(n), bias);

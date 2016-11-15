@@ -161,13 +161,22 @@ template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     const Dtype* weights, Dtype* output, bool skip_im2col) {
 
-  int col_size = kernel_dim_*height_*width_;
-  std::cout << "Col size is " << col_size << ", memory size is " << col_size*sizeof(Dtype) << " bytes" << std::endl;
+  std::size_t col_count = kernel_dim_*height_*width_;
+  std::size_t col_bytes = col_count * sizeof(Dtype);
+  std::cout << "Col size is " << col_count << ", memory size is " << col_bytes << " bytes, " << col_bytes/1024/1024 << " MB" << std::endl;
+  std::size_t MAX_BYTES = 1.2*1024*1024*1024;
+//  std::size_t MAX_BYTES = 500;
 
-  int SPLIT_SIZE = 500*1024*1024/sizeof(Dtype);
-  if (col_size > SPLIT_SIZE){
-    int split_count = (col_size + 1) / SPLIT_SIZE;
-    std::cout << "Split into " << split_count << " splits. Split size is " << SPLIT_SIZE << std::endl;
+  if (col_bytes > MAX_BYTES){
+    int split_count = 2;
+    std::size_t split_bytes = 0;
+    for(; split_count < 9; split_count *= 2){
+      split_bytes = col_bytes / split_count;
+      if (split_bytes < MAX_BYTES){
+        break;
+      }
+    }
+    std::cout << "Split into " << split_count << " splits. Split size is " << split_bytes << " bytes, " << split_bytes/1024/1024 << " MB" << std::endl;
 
     Blob<Dtype> col_buffer_split;
     vector<int> col_buffer_split_shape(col_buffer_.shape());
@@ -185,27 +194,89 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     out_split.Reshape(1, conv_out_channels_, height_out_, width_out_);
     Dtype* out = out_split.mutable_cpu_data();
 
-    std::cout << "col_buffer_'s shape is " << col_buffer_.shape_string() << std::endl;
-    std::cout << "col_buffer_split's shape is " << col_buffer_split.shape_string() << std::endl;
-    std::cout << "weight_split's shape is " << weight_split.shape_string() << std::endl;
-    std::cout << "out_split's shape is " << out_split.shape_string() << std::endl;
+    std::cout << "++++++++col_buffer_'s shape is " << col_buffer_.shape_string() << std::endl;
+    std::cout << "++++++++col_buffer_split's shape is " << col_buffer_split.shape_string() << std::endl;
+    std::cout << "++++++++weight_split's shape is " << weight_split.shape_string() << std::endl;
+    std::cout << "++++++++out_split's shape is " << out_split.shape_string() << std::endl;
 
     memset(output, 0, sizeof(Dtype)*out_split.count());
     for(int split = 0; split < split_count; split++){
-      conv_im2col_cpu_split(input + split * height_ * width_, col, split_count);
+      conv_im2col_cpu_split(input + split * weight_split_channels * height_ * width_, 
+          col, split_count);
+
+//      std::cout << "col_buffer_split " << split << std::endl;
+//      for(int n = 0; n < col_buffer_split.shape(0); n++){
+//        std::cout << "In chan --------" << n << std::endl;
+//        for(int c = 0; c < col_buffer_split.shape(1); c++){
+//          std::cout << "Outchan[" << c << "] ";
+//          for(int i = 0; i < col_buffer_split.shape(2)*col_buffer_split.shape(3); i++){
+//            int id = n * col_buffer_split.shape(1) * col_buffer_split.shape(2)*col_buffer_split.shape(3) + c * col_buffer_split.shape(2)*col_buffer_split.shape(3) + i;
+//            std::cout << " " << col[id];
+//          }
+//          std::cout << std::endl;
+//        }
+//        std::cout << "----------" << std::endl;
+//      }
+//      std::cout << "==========" << std::endl;
+
       for(int n = 0; n < conv_out_channels_; n++){
-        int id = n * conv_in_channels_ * kernel_size + split * kernel_size;
-        memcpy(w + n * kernel_size, weights + id, kernel_size * sizeof(Dtype));
+        int block = weight_split_channels * kernel_size;
+        int id = n * conv_in_channels_ * kernel_size + split * block;
+        memcpy(w + n * block, weights + id, block * sizeof(Dtype));
       }
+
+//      for(int n = 0; n < conv_out_channels_; n++){
+//        std::cout << "In chan --------" << n << std::endl;
+//        for(int c = 0; c < conv_in_channels_; c++){
+//          std::cout << "Outchan[" << c << "] ";
+//          for(int i = 0; i < kernel_size; i++){
+//            int id = n * conv_in_channels_ * kernel_size + c * kernel_size + i;
+//            std::cout << " " << weights[id];
+//          }
+//          std::cout << std::endl;
+//        }
+//        std::cout << "----------" << std::endl;
+//      }
+//      std::cout << "==========" << std::endl;
+//
+//      for(int n = 0; n < conv_out_channels_; n++){
+//        std::cout << "In chan --------" << n << std::endl;
+//        for(int c = 0; c < weight_split_channels; c++){
+//          std::cout << "Outchan[" << c << "] ";
+//          for(int i = 0; i < kernel_size; i++){
+//            int id = n * weight_split_channels * kernel_size + c * kernel_size + i;
+//            std::cout << " " << w[id];
+//          }
+//          std::cout << std::endl;
+//        }
+//        std::cout << "----------" << std::endl;
+//      }
 
       caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
           group_, conv_out_spatial_dim_, weight_split_channels * kernel_size / group_,
           (Dtype)1., w, col,
           (Dtype)0., out);
 
+      std::cout << ">>>>>>>>>>>> out" << std::endl;
+      for(int i = 0; i < 10; i++){
+        std::cout << " " << out[i];
+      }
+      std::cout << std::endl;
+
+      std::cout << ">>>>>>>>>>>> output" << std::endl;
+      for(int i = 0; i < 10; i++){
+        std::cout << " " << output[i];
+      }
+      std::cout << std::endl;
+
       for(int i = 0; i < out_split.count(); i++){
         output[i] += out[i];
       }
+      std::cout << ">>>>>>>>>>>> output sum" << std::endl;
+      for(int i = 0; i < 10; i++){
+        std::cout << " " << output[i];
+      }
+      std::cout << std::endl;
     }
 
   }else{
@@ -216,11 +287,19 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
       }
       col_buff = col_buffer_.cpu_data();
     }
+    std::cout << "--------col_buffer_'s shape is " << col_buffer_.shape_string() << std::endl;
+    std::cout << "--------output_offset_ is " << output_offset_ << std::endl;
     for (int g = 0; g < group_; ++g) {
       caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, conv_out_channels_ /
           group_, conv_out_spatial_dim_, kernel_dim_ / group_,
           (Dtype)1., weights + weight_offset_ * g, col_buff + col_offset_ * g,
           (Dtype)0., output + output_offset_ * g);
+
+      std::cout << ">>>>>>>>>>>> output final" << std::endl;
+      for(int i = 0; i < 10; i++){
+        std::cout << " " << output[i];
+      }
+      std::cout << std::endl;
     }
   }
 }

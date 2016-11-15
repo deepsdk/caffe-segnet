@@ -34,6 +34,8 @@ class BaseConvolutionLayer : public Layer<Dtype> {
   virtual inline int MinTopBlobs() const { return 1; }
   virtual inline bool EqualNumBottomTopBlobs() const { return true; }
 
+  virtual inline void ClearBuffer(){ col_buffer_.ReleaseMem(); }
+
  protected:
   // Helper functions that abstract away the column buffer and gemm arguments.
   // The last argument in forward_cpu_gemm is so that we can skip the im2col if
@@ -80,6 +82,10 @@ class BaseConvolutionLayer : public Layer<Dtype> {
   // wrap im2col/col2im so we don't have to remember the (long) argument lists
   inline void conv_im2col_cpu(const Dtype* data, Dtype* col_buff) {
     im2col_cpu(data, conv_in_channels_, conv_in_height_, conv_in_width_,
+        kernel_h_, kernel_w_, pad_h_, pad_w_, stride_h_, stride_w_, col_buff);
+  }
+  inline void conv_im2col_cpu_split(const Dtype* data, Dtype* col_buff, int splits) {
+    im2col_cpu(data, (conv_in_channels_+1)/splits, conv_in_height_, conv_in_width_,
         kernel_h_, kernel_w_, pad_h_, pad_w_, stride_h_, stride_w_, col_buff);
   }
   inline void conv_col2im_cpu(const Dtype* col_buff, Dtype* data) {

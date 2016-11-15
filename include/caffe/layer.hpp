@@ -285,6 +285,7 @@ class Layer {
     param_propagate_down_[param_id] = value;
   }
 
+  virtual inline void ClearBuffer() {}
 
  protected:
   /** The protobuf that stores the layer parameters */

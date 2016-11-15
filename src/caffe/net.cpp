@@ -505,7 +505,19 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   }
   for (int i = start; i <= end; ++i) {
     // LOG(ERROR) << "Forwarding " << layer_names_[i];
+    std::cout << "dbg>net>+++++++++++++++++++++++++  Forwarding " << layer_names_[i] << std::endl;
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+    std::cout << "dbg>net>+++++++++++++++++++++++++ Done." << std::endl;
+//    string type(layers_[i]->type());
+//    if (type == "Convolution"){
+//      std::cout << "Clear col_buffer_ of " << layer_names_[i] << ". Continue?";
+//      string line;
+////      getline(std::cin, line);
+//      layers_[i]->ClearBuffer();
+//      std::cout << "Done. Continue?";
+////      getline(std::cin, line);
+//    }
+
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
   }
