@@ -16,8 +16,6 @@
 
 #include "caffe/test/test_caffe_main.hpp"
 
-#include <ctime>
-
 namespace caffe {
 
 template <typename Dtype>
@@ -542,24 +540,17 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
       InputDebugInfo(i);
     }
   }
-  const std::clock_t start_all = std::clock();
   for (int i = start; i <= end; ++i) {
     // LOG(ERROR) << "Forwarding " << layer_names_[i];
-    std::cout << "dbg>net>+++++++++++++++++++++++++" << std::endl;
-    std::cout << "dbg>net>  Forwarding " << layer_names_[i] << std::endl;
-    const std::clock_t start = std::clock();
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
     double vm = 0;
     double rss = 0;
     process_mem_usage(vm, rss);
-    std::cout << "+++++++++++++++++++             mem: " << rss << ", " << rss/1024 << " MB" << std::endl;
-    std::cout << "dbg>net>  Done. elapsed time is " << float(std::clock()-start)/CLOCKS_PER_SEC << std::endl;
-    std::cout << "dbg>net>+++++++++++++++++++++++++" << std::endl;
+    std::cout << "dbg>net> after forward " << i << " mem: " << rss/1024 << " MB" << std::endl;
 
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
   }
-  std::cout << "dbg>net>  All done. elapsed time is " << float(std::clock()-start_all)/CLOCKS_PER_SEC << std::endl;
   return loss;
 }
 
