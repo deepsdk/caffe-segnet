@@ -157,8 +157,6 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   }
 }
 
-void process_mem_usage(double& vm_usage, double& resident_set);
-
 template <typename Dtype>
 void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
     const Dtype* weights, Dtype* output, bool skip_im2col) {
@@ -206,12 +204,11 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
           group_, conv_out_spatial_dim_, weight_split_channels * kernel_size / group_,
           (Dtype)1., w, col,
           (Dtype)0., out);
-    }
 
-    double vm = 0;
-    double rss = 0;
-    process_mem_usage(vm, rss);
-    std::cout << "+++++ dbg>base_conv>         mem: " << rss << ", [[" << rss/1024 << " MB]]" << std::endl;
+      for(int i = 0; i < out_split.count(); i++){
+        output[i] += out[i];
+      }
+    }
 
   }else{
     const Dtype* col_buff = input;
@@ -227,11 +224,6 @@ void BaseConvolutionLayer<Dtype>::forward_cpu_gemm(const Dtype* input,
           (Dtype)1., weights + weight_offset_ * g, col_buff + col_offset_ * g,
           (Dtype)0., output + output_offset_ * g);
     }
-
-    double vm = 0;
-    double rss = 0;
-    process_mem_usage(vm, rss);
-    std::cout << "dbg>base_conv>with col mem: [[" << rss/1024 << " MB]]" << std::endl;
 
     col_buffer_.ReleaseMem(); 
   }

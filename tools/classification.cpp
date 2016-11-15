@@ -205,7 +205,6 @@ void Classifier::SetMean(const string& mean_file) {
 
 void Classifier::OutputMaskFile() {
   Blob<float>* blob = net_->output_blobs()[0];
-  std::cout << "dbg>output_layer=" << blob->shape_string() << std::endl;
 
   const int channels = blob->channels();
   const int height = blob->height();
