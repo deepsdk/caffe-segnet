@@ -31,7 +31,7 @@ SRC_DIRS := $(shell find * -type d -exec bash -c "find {} -maxdepth 1 \
 # The target shared library name
 LIB_BUILD_DIR := $(BUILD_DIR)/lib
 STATIC_NAME := $(LIB_BUILD_DIR)/lib$(PROJECT).a
-DYNAMIC_NAME := $(LIB_BUILD_DIR)/lib$(PROJECT).so
+DYNAMIC_NAME := $(LIB_BUILD_DIR)/lib$(PROJECT)_segnet.so
 
 ##############################
 # Get all source files
@@ -584,7 +584,7 @@ $(TOOL_BUILD_DIR)/%: $(TOOL_BUILD_DIR)/%.bin | $(TOOL_BUILD_DIR)
 
 $(TOOL_BINS): %.bin : %.o | $(DYNAMIC_NAME)
 	@ echo CXX/LD -o $@
-	$(Q)$(CXX) $< -o $@ $(LINKFLAGS) -l$(PROJECT) $(LDFLAGS) \
+	$(Q)$(CXX) $< -o $@ $(LINKFLAGS) -l$(PROJECT)_segnet $(LDFLAGS) \
 		-Wl,-rpath,$(ORIGIN)/../lib
 
 $(EXAMPLE_BINS): %.bin : %.o | $(DYNAMIC_NAME)
